@@ -121,215 +121,135 @@ chmod +x cleanup-storage-demo.sh
 }
 ```
 
-### Additional Policy Examples
-
-#### Aggressive Cost Optimization
-```json
+Apply the policy with:
+```bash
+# Option 1: Create the policy file first
+cat > lifecycle-policy.json << 'EOF'
 {
   "rules": [
     {
-      "name": "AggressiveOptimization",
+      "name": "CostOptimization",
       "enabled": true,
       "type": "Lifecycle",
       "definition": {
         "filters": {
-          "blobTypes": ["blockBlob"],
-          "prefixMatch": ["logs/", "backups/"]
+          "blobTypes": ["blockBlob"]
         },
         "actions": {
           "baseBlob": {
-            "tierToCool": { "daysAfterModificationGreaterThan": 7 },
-            "tierToArchive": { "daysAfterModificationGreaterThan": 30 },
-            "delete": { "daysAfterModificationGreaterThan": 180 }
+            "tierToCool": {
+              "daysAfterModificationGreaterThan": 30
+            },
+            "tierToArchive": {
+              "daysAfterModificationGreaterThan": 90
+            },
+            "delete": {
+              "daysAfterModificationGreaterThan": 365
+            }
           }
         }
       }
     }
   ]
 }
-```
+EOF
 
-#### Version Management
-```json
-{
-  "rules": [
-    {
-      "name": "VersionManagement",
-      "enabled": true,
-      "type": "Lifecycle",
-      "definition": {
-        "filters": { "blobTypes": ["blockBlob"] },
-        "actions": {
-          "version": {
-            "tierToCool": { "daysAfterCreationGreaterThan": 30 },
-            "tierToArchive": { "daysAfterCreationGreaterThan": 90 },
-            "delete": { "daysAfterCreationGreaterThan": 365 }
-          }
-        }
-      }
-    }
-  ]
-}
-```
-
-Apply with:
-```bash
+# Then apply the policy (replace with your actual storage account name)
 az storage account management-policy create \
-  --account-name stgdemo73842515805std \
+  --account-name stgdemoXXXXXXXXXXXstd \
   --resource-group rg-storage-demo \
   --policy @lifecycle-policy.json
+
+# Option 2: Apply policy directly with inline JSON
+az storage account management-policy create \
+  --account-name stgdemoXXXXXXXXXXXstd \
+  --resource-group rg-storage-demo \
+  --policy '{
+    "rules": [
+      {
+        "name": "CostOptimization",
+        "enabled": true,
+        "type": "Lifecycle",
+        "definition": {
+          "filters": {
+            "blobTypes": ["blockBlob"]
+          },
+          "actions": {
+            "baseBlob": {
+              "tierToCool": {
+                "daysAfterModificationGreaterThan": 30
+              },
+              "tierToArchive": {
+                "daysAfterModificationGreaterThan": 90
+              },
+              "delete": {
+                "daysAfterModificationGreaterThan": 365
+              }
+            }
+          }
+        }
+      }
+    ]
+  }'
 ```
 
 ## Cost Monitoring & Testing
 
 ### Get Your Actual Storage Account Names
-Since storage account names are randomized, use these commands to get your actual names:
+Since storage account names are randomized, use this command to list all accounts:
 ```bash
 # List all storage accounts in the demo resource group
 az storage account list \
   --resource-group rg-storage-demo \
   --query "[].name" \
   --output table
-
-# Get specific account types (example for LRS accounts)
-az storage account list \
-  --resource-group rg-storage-demo \
-  --query "[?contains(name, 'std')].name" \
-  --output table
-
-# Get GRS accounts (geo-redundant)
-az storage account list \
-  --resource-group rg-storage-demo \
-  --query "[?contains(name, 'grs')].name" \
-  --output table
-
-# Get ZRS accounts (zone-redundant)
-az storage account list \
-  --resource-group rg-storage-demo \
-  --query "[?contains(name, 'zrs')].name" \
-  --output table
-
-# Save account names to variables for easy reuse
-STD_ACCOUNT=$(az storage account list --resource-group rg-storage-demo --query "[?contains(name, 'std')].name | [0]" --output tsv)
-GRS_ACCOUNT=$(az storage account list --resource-group rg-storage-demo --query "[?contains(name, 'grs')].name | [0]" --output tsv)
-echo "Standard account: $STD_ACCOUNT"
-echo "GRS account: $GRS_ACCOUNT"
 ```
 
 ### Monitor Storage Costs
 ```bash
-# Get cost analysis for the resource group
-az consumption usage list \
-  --start-date 2024-01-01 \
-  --end-date 2024-01-31 \
-  --resource-group rg-storage-demo \
-  --output table
-
 # Check storage usage by region
 az storage account show-usage --location "Sweden Central"
 
-# Get blob service properties (using variable)
-az storage account blob-service-properties show \
-  --account-name $STD_ACCOUNT \
-  --resource-group rg-storage-demo
-
-# Compare properties between account types
-az storage account blob-service-properties show \
-  --account-name $GRS_ACCOUNT \
+# Get basic account information
+az storage account show \
+  --name <your-storage-account-name> \
   --resource-group rg-storage-demo
 ```
 
 ### Create Test Data
 ```bash
-# Create test files of different sizes
+# Create a test file
 echo "Small file content for testing" > small-file.txt
-dd if=/dev/zero of=large-file.dat bs=1M count=100 2>/dev/null || echo "Note: dd command not available on Windows. Create a large file manually."
 
-# Create containers first (if not already created by the setup script)
+# Create container and upload file
 az storage container create \
-  --account-name stgdemo73842515801std \
+  --account-name <your-storage-account-name> \
   --name demo-container \
   --auth-mode login
 
-# Upload to storage accounts with proper authentication
 az storage blob upload \
-  --account-name stgdemo73842515801std \
+  --account-name <your-storage-account-name> \
   --container-name demo-container \
   --file small-file.txt \
   --name test-data/small-file.txt \
   --auth-mode login
-
-# Upload large file (if created successfully)
-az storage blob upload \
-  --account-name stgdemo73842515801std \
-  --container-name demo-container \
-  --file large-file.dat \
-  --name test-data/large-file.dat \
-  --auth-mode login
-```
-
-### Alternative Authentication Methods
-```bash
-# Method 1: Using connection string
-CONN_STRING=$(az storage account show-connection-string \
-  --name stgdemo73842515801std \
-  --resource-group rg-storage-demo \
-  --query connectionString \
-  --output tsv)
-
-az storage blob upload \
-  --connection-string "$CONN_STRING" \
-  --container-name demo-container \
-  --file small-file.txt \
-  --name test-data/small-file-alt.txt
-
-# Method 2: Using account key
-ACCOUNT_KEY=$(az storage account keys list \
-  --account-name stgdemo73842515801std \
-  --resource-group rg-storage-demo \
-  --query '[0].value' \
-  --output tsv)
-
-az storage blob upload \
-  --account-name stgdemo73842515801std \
-  --account-key "$ACCOUNT_KEY" \
-  --container-name demo-container \
-  --file small-file.txt \
-  --name test-data/small-file-key.txt
 ```
 
 ### Archive Tier Demonstration
 ```bash
-# First, create a container for demo purposes
-az storage container create \
-  --account-name stgdemo73842515805std \
-  --name demo-container \
-  --auth-mode login
-
-# Create a test file
-echo "This is a test file for archive demonstration" > small-file.txt
-
-# Upload the test blob with Azure AD authentication
-az storage blob upload \
-  --account-name stgdemo73842515805std \
-  --container-name demo-container \
-  --file small-file.txt \
-  --name archive-demo/test-file.txt \
-  --auth-mode login
-
-# Set the blob to Archive tier manually (for immediate demo)
+# Set a blob to Archive tier
 az storage blob set-tier \
-  --account-name stgdemo73842515805std \
+  --account-name <your-storage-account-name> \
   --container-name demo-container \
-  --name archive-demo/test-file.txt \
+  --name test-data/small-file.txt \
   --tier Archive \
   --auth-mode login
 
 # Check the tier of the blob
 az storage blob show \
-  --account-name stgdemo73842515805std \
+  --account-name <your-storage-account-name> \
   --container-name demo-container \
-  --name archive-demo/test-file.txt \
+  --name test-data/small-file.txt \
   --query "properties.blobTier" \
   --output tsv \
   --auth-mode login
