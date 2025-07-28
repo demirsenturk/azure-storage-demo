@@ -22,6 +22,10 @@ cd azure-storage-demo
 chmod +x create-storage-demo.sh
 ./create-storage-demo.sh
 
+# Run lifecycle management demo (after storage accounts are created)
+chmod +x demo-lifecycle-management.sh
+./demo-lifecycle-management.sh
+
 # Clean up when done
 chmod +x cleanup-storage-demo.sh
 ./cleanup-storage-demo.sh
@@ -33,6 +37,8 @@ chmod +x cleanup-storage-demo.sh
 - Azure CLI access (Azure Cloud Shell recommended)
 
 ## Storage Accounts Created
+
+> **Note:** Storage account names are automatically randomized with a unique suffix (e.g., `stgdemo12345601std`) to avoid naming conflicts when running the script multiple times. The examples below show the pattern without the random suffix.
 
 ### Standard LRS Accounts (1-5)
 | Account | Type | Tier | Features |
@@ -86,6 +92,318 @@ chmod +x cleanup-storage-demo.sh
 ### 3. V1 vs V2 Comparison
 - **V1 Accounts**: stgdemo17v1, stgdemo18v1, stgdemo19v1, stgdemo20v1
 - **V2 Equivalent**: stgdemo01std, stgdemo06grs, stgdemo08grs, stgdemo11zrs
+
+## Lifecycle Management Deep Dive
+
+The demo environment includes storage accounts specifically configured to demonstrate different lifecycle management strategies. This section provides comprehensive examples for implementing automated cost optimization through lifecycle policies.
+
+### Lifecycle Policy Templates
+
+#### 1. Basic Cost Optimization Policy
+Save as `basic-lifecycle.json`:
+```json
+{
+  "rules": [
+    {
+      "name": "BasicCostOptimization",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"]
+        },
+        "actions": {
+          "baseBlob": {
+            "tierToCool": {
+              "daysAfterModificationGreaterThan": 30
+            },
+            "tierToArchive": {
+              "daysAfterModificationGreaterThan": 90
+            },
+            "delete": {
+              "daysAfterModificationGreaterThan": 2555
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+#### 2. Aggressive Cost Optimization for Logs/Backups
+Save as `aggressive-lifecycle.json`:
+```json
+{
+  "rules": [
+    {
+      "name": "LogsOptimization",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"],
+          "prefixMatch": ["logs/", "backups/", "archives/"]
+        },
+        "actions": {
+          "baseBlob": {
+            "tierToCool": { "daysAfterModificationGreaterThan": 7 },
+            "tierToArchive": { "daysAfterModificationGreaterThan": 30 },
+            "delete": { "daysAfterModificationGreaterThan": 180 }
+          }
+        }
+      }
+    },
+    {
+      "name": "ApplicationDataOptimization",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"],
+          "prefixMatch": ["data/", "uploads/"]
+        },
+        "actions": {
+          "baseBlob": {
+            "tierToCool": { "daysAfterModificationGreaterThan": 60 },
+            "tierToArchive": { "daysAfterModificationGreaterThan": 180 },
+            "delete": { "daysAfterModificationGreaterThan": 1095 }
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+#### 3. Version Management Policy
+Save as `version-lifecycle.json`:
+```json
+{
+  "rules": [
+    {
+      "name": "VersionManagement",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": { 
+          "blobTypes": ["blockBlob"] 
+        },
+        "actions": {
+          "baseBlob": {
+            "tierToCool": { "daysAfterModificationGreaterThan": 30 },
+            "tierToArchive": { "daysAfterModificationGreaterThan": 90 }
+          },
+          "version": {
+            "tierToCool": { "daysAfterCreationGreaterThan": 30 },
+            "tierToArchive": { "daysAfterCreationGreaterThan": 90 },
+            "delete": { "daysAfterCreationGreaterThan": 365 }
+          },
+          "snapshot": {
+            "tierToCool": { "daysAfterCreationGreaterThan": 30 },
+            "delete": { "daysAfterCreationGreaterThan": 90 }
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+#### 4. Compliance-Focused Long Retention Policy
+Save as `compliance-lifecycle.json`:
+```json
+{
+  "rules": [
+    {
+      "name": "ComplianceRetention",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"],
+          "prefixMatch": ["compliance/", "audit/", "legal/"]
+        },
+        "actions": {
+          "baseBlob": {
+            "tierToCool": { "daysAfterModificationGreaterThan": 90 },
+            "tierToArchive": { "daysAfterModificationGreaterThan": 365 }
+          }
+        }
+      }
+    },
+    {
+      "name": "GeneralBusinessData",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"],
+          "prefixMatch": ["business/", "reports/"]
+        },
+        "actions": {
+          "baseBlob": {
+            "tierToCool": { "daysAfterModificationGreaterThan": 30 },
+            "tierToArchive": { "daysAfterModificationGreaterThan": 180 },
+            "delete": { "daysAfterModificationGreaterThan": 2555 }
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+### Implementing Lifecycle Policies
+
+#### Step 1: Choose the Right Storage Account
+```bash
+# Get storage account names for different scenarios
+COOL_ACCOUNTS=$(az storage account list --resource-group rg-storage-demo --query "[?accessTier=='Cool'].name" --output tsv)
+echo "Cool tier accounts suitable for lifecycle policies:"
+for account in $COOL_ACCOUNTS; do
+    echo "  - $account"
+done
+
+# Select account with all features enabled for comprehensive demo
+LIFECYCLE_ACCOUNT=$(az storage account list --resource-group rg-storage-demo --query "[?contains(name, '05std')].name | [0]" --output tsv)
+echo "Selected account for lifecycle demo: $LIFECYCLE_ACCOUNT"
+```
+
+#### Step 2: Apply Different Policies to Different Accounts
+```bash
+# Apply basic policy to a standard account
+az storage account management-policy create \
+  --account-name $LIFECYCLE_ACCOUNT \
+  --resource-group rg-storage-demo \
+  --policy @basic-lifecycle.json
+
+# Apply aggressive policy to a GRS account for cost demonstration
+GRS_LIFECYCLE_ACCOUNT=$(az storage account list --resource-group rg-storage-demo --query "[?contains(name, '07grs')].name | [0]" --output tsv)
+az storage account management-policy create \
+  --account-name $GRS_LIFECYCLE_ACCOUNT \
+  --resource-group rg-storage-demo \
+  --policy @aggressive-lifecycle.json
+
+# Apply version management to an account with versioning enabled
+VERSION_ACCOUNT=$(az storage account list --resource-group rg-storage-demo --query "[?contains(name, '02std')].name | [0]" --output tsv)
+az storage account management-policy create \
+  --account-name $VERSION_ACCOUNT \
+  --resource-group rg-storage-demo \
+  --policy @version-lifecycle.json
+```
+
+#### Step 3: Monitor Policy Execution
+```bash
+# Check current management policy
+az storage account management-policy show \
+  --account-name $LIFECYCLE_ACCOUNT \
+  --resource-group rg-storage-demo
+
+# View blob access times and tiers
+az storage blob list \
+  --account-name $LIFECYCLE_ACCOUNT \
+  --container-name demo-container \
+  --query "[].{Name:name, Tier:properties.blobTier, LastModified:properties.lastModified, AccessTime:properties.lastAccessedOn}" \
+  --output table \
+  --auth-mode login
+
+# Check policy rule execution (requires time for Azure to process)
+az storage account management-policy show \
+  --account-name $LIFECYCLE_ACCOUNT \
+  --resource-group rg-storage-demo \
+  --query "policy.rules[].definition.actions"
+```
+
+### Testing Lifecycle Policies
+
+#### Create Test Data with Different Age Patterns
+```bash
+# Set variables for easy reuse
+LIFECYCLE_ACCOUNT=$(az storage account list --resource-group rg-storage-demo --query "[?contains(name, '05std')].name | [0]" --output tsv)
+
+# Create container for lifecycle testing
+az storage container create \
+  --account-name $LIFECYCLE_ACCOUNT \
+  --name lifecycle-demo \
+  --auth-mode login
+
+# Create test files simulating different data types and ages
+echo "Recent application data - $(date)" > recent-data.txt
+echo "Older log data from previous month" > logs/monthly-log-$(date +%Y%m).txt
+echo "Backup data from quarter" > backups/quarterly-backup-$(date +%Y%m).tar
+echo "Compliance document" > compliance/audit-report-$(date +%Y).pdf
+echo "Business report" > business/monthly-report-$(date +%Y%m).xlsx
+
+# Upload files to different prefixes for policy testing
+az storage blob upload --account-name $LIFECYCLE_ACCOUNT --container-name lifecycle-demo --file recent-data.txt --name data/recent-data.txt --auth-mode login
+az storage blob upload --account-name $LIFECYCLE_ACCOUNT --container-name lifecycle-demo --file logs/monthly-log-$(date +%Y%m).txt --name logs/monthly-log-$(date +%Y%m).txt --auth-mode login
+az storage blob upload --account-name $LIFECYCLE_ACCOUNT --container-name lifecycle-demo --file backups/quarterly-backup-$(date +%Y%m).tar --name backups/quarterly-backup-$(date +%Y%m).tar --auth-mode login
+az storage blob upload --account-name $LIFECYCLE_ACCOUNT --container-name lifecycle-demo --file compliance/audit-report-$(date +%Y).pdf --name compliance/audit-report-$(date +%Y).pdf --auth-mode login
+az storage blob upload --account-name $LIFECYCLE_ACCOUNT --container-name lifecycle-demo --file business/monthly-report-$(date +%Y%m).xlsx --name business/monthly-report-$(date +%Y%m).xlsx --auth-mode login
+```
+
+#### Simulate Different Access Patterns
+```bash
+# Simulate recent access (keeps in Hot tier longer)
+az storage blob show \
+  --account-name $LIFECYCLE_ACCOUNT \
+  --container-name lifecycle-demo \
+  --name data/recent-data.txt \
+  --auth-mode login > /dev/null
+
+# Simulate old data (will be moved to Cool/Archive faster)
+az storage blob update \
+  --account-name $LIFECYCLE_ACCOUNT \
+  --container-name lifecycle-demo \
+  --name logs/monthly-log-$(date +%Y%m).txt \
+  --content-type "text/plain" \
+  --auth-mode login
+
+# Check current blob tiers and access times
+az storage blob list \
+  --account-name $LIFECYCLE_ACCOUNT \
+  --container-name lifecycle-demo \
+  --query "[].{Name:name, Tier:properties.blobTier, Size:properties.contentLength, LastModified:properties.lastModified}" \
+  --output table \
+  --auth-mode login
+```
+
+### Cost Impact Analysis
+
+#### Compare Costs Across Different Lifecycle Strategies
+```bash
+# Get storage accounts with different lifecycle configurations
+echo "Storage accounts for lifecycle cost comparison:"
+echo "1. Basic LRS (minimal features): $(az storage account list --resource-group rg-storage-demo --query "[?contains(name, '01std')].name | [0]" --output tsv)"
+echo "2. Cool with lifecycle: $(az storage account list --resource-group rg-storage-demo --query "[?contains(name, '05std')].name | [0]" --output tsv)"
+echo "3. GRS with aggressive lifecycle: $(az storage account list --resource-group rg-storage-demo --query "[?contains(name, '07grs')].name | [0]" --output tsv)"
+echo "4. ZRS with version management: $(az storage account list --resource-group rg-storage-demo --query "[?contains(name, '12zrs')].name | [0]" --output tsv)"
+
+# Calculate potential savings (example calculation)
+echo ""
+echo "Lifecycle Policy Cost Savings Scenarios:"
+echo "• Hot to Cool transition (30 days): ~50% storage cost reduction"
+echo "• Cool to Archive transition (90 days): ~75% storage cost reduction"  
+echo "• Version cleanup (365 days): Eliminates old version storage costs"
+echo "• Prefix-based policies: Targeted optimization for specific data types"
+```
+
+### Best Practices for Lifecycle Management
+
+#### Policy Design Guidelines
+1. **Start Conservative**: Begin with longer retention periods and adjust based on access patterns
+2. **Use Prefixes**: Target specific data types with appropriate policies  
+3. **Test Thoroughly**: Use test storage accounts before applying to production
+4. **Monitor Regularly**: Track policy execution and cost impact
+5. **Document Policies**: Maintain clear documentation of business justification
+
+#### Recommended Policy Schedule
+- **Hot to Cool**: 30-90 days (depending on access patterns)
+- **Cool to Archive**: 90-365 days (balance access needs vs cost)
+- **Version Cleanup**: 90-365 days (based on recovery requirements)  
+- **Snapshot Cleanup**: 30-90 days (shorter than versions)
+- **Complete Deletion**: 1-7 years (based on compliance requirements)
 
 ## Lifecycle Policy Example
 
@@ -173,12 +491,46 @@ chmod +x cleanup-storage-demo.sh
 Apply with:
 ```bash
 az storage account management-policy create \
-  --account-name stgdemo05std \
+  --account-name stgdemo73842515805std \
   --resource-group rg-storage-demo \
   --policy @lifecycle-policy.json
 ```
 
 ## Cost Monitoring & Testing
+
+### Get Your Actual Storage Account Names
+Since storage account names are randomized, use these commands to get your actual names:
+```bash
+# List all storage accounts in the demo resource group
+az storage account list \
+  --resource-group rg-storage-demo \
+  --query "[].name" \
+  --output table
+
+# Get specific account types (example for LRS accounts)
+az storage account list \
+  --resource-group rg-storage-demo \
+  --query "[?contains(name, 'std')].name" \
+  --output table
+
+# Get GRS accounts (geo-redundant)
+az storage account list \
+  --resource-group rg-storage-demo \
+  --query "[?contains(name, 'grs')].name" \
+  --output table
+
+# Get ZRS accounts (zone-redundant)
+az storage account list \
+  --resource-group rg-storage-demo \
+  --query "[?contains(name, 'zrs')].name" \
+  --output table
+
+# Save account names to variables for easy reuse
+STD_ACCOUNT=$(az storage account list --resource-group rg-storage-demo --query "[?contains(name, 'std')].name | [0]" --output tsv)
+GRS_ACCOUNT=$(az storage account list --resource-group rg-storage-demo --query "[?contains(name, 'grs')].name | [0]" --output tsv)
+echo "Standard account: $STD_ACCOUNT"
+echo "GRS account: $GRS_ACCOUNT"
+```
 
 ### Monitor Storage Costs
 ```bash
@@ -192,9 +544,14 @@ az consumption usage list \
 # Check storage usage by region
 az storage account show-usage --location "Sweden Central"
 
-# Get blob service properties
+# Get blob service properties (using variable)
 az storage account blob-service-properties show \
-  --account-name stgdemo01std \
+  --account-name $STD_ACCOUNT \
+  --resource-group rg-storage-demo
+
+# Compare properties between account types
+az storage account blob-service-properties show \
+  --account-name $GRS_ACCOUNT \
   --resource-group rg-storage-demo
 ```
 
@@ -206,13 +563,13 @@ dd if=/dev/zero of=large-file.dat bs=1M count=100 2>/dev/null || echo "Note: dd 
 
 # Create containers first (if not already created by the setup script)
 az storage container create \
-  --account-name stgdemo01std \
+  --account-name stgdemo73842515801std \
   --name demo-container \
   --auth-mode login
 
 # Upload to storage accounts with proper authentication
 az storage blob upload \
-  --account-name stgdemo01std \
+  --account-name stgdemo73842515801std \
   --container-name demo-container \
   --file small-file.txt \
   --name test-data/small-file.txt \
@@ -220,7 +577,7 @@ az storage blob upload \
 
 # Upload large file (if created successfully)
 az storage blob upload \
-  --account-name stgdemo01std \
+  --account-name stgdemo73842515801std \
   --container-name demo-container \
   --file large-file.dat \
   --name test-data/large-file.dat \
@@ -231,7 +588,7 @@ az storage blob upload \
 ```bash
 # Method 1: Using connection string
 CONN_STRING=$(az storage account show-connection-string \
-  --name stgdemo01std \
+  --name stgdemo73842515801std \
   --resource-group rg-storage-demo \
   --query connectionString \
   --output tsv)
@@ -244,13 +601,13 @@ az storage blob upload \
 
 # Method 2: Using account key
 ACCOUNT_KEY=$(az storage account keys list \
-  --account-name stgdemo01std \
+  --account-name stgdemo73842515801std \
   --resource-group rg-storage-demo \
   --query '[0].value' \
   --output tsv)
 
 az storage blob upload \
-  --account-name stgdemo01std \
+  --account-name stgdemo73842515801std \
   --account-key "$ACCOUNT_KEY" \
   --container-name demo-container \
   --file small-file.txt \
@@ -261,7 +618,7 @@ az storage blob upload \
 ```bash
 # First, create a container for demo purposes
 az storage container create \
-  --account-name stgdemo05std \
+  --account-name stgdemo73842515805std \
   --name demo-container \
   --auth-mode login
 
@@ -270,7 +627,7 @@ echo "This is a test file for archive demonstration" > small-file.txt
 
 # Upload the test blob with Azure AD authentication
 az storage blob upload \
-  --account-name stgdemo05std \
+  --account-name stgdemo73842515805std \
   --container-name demo-container \
   --file small-file.txt \
   --name archive-demo/test-file.txt \
@@ -278,7 +635,7 @@ az storage blob upload \
 
 # Set the blob to Archive tier manually (for immediate demo)
 az storage blob set-tier \
-  --account-name stgdemo05std \
+  --account-name stgdemo73842515805std \
   --container-name demo-container \
   --name archive-demo/test-file.txt \
   --tier Archive \
@@ -286,7 +643,7 @@ az storage blob set-tier \
 
 # Check the tier of the blob
 az storage blob show \
-  --account-name stgdemo05std \
+  --account-name stgdemo73842515805std \
   --container-name demo-container \
   --name archive-demo/test-file.txt \
   --query "properties.blobTier" \
@@ -303,16 +660,25 @@ az storage blob show \
 
 ## Configuration
 
-Edit variables in `create-storage-demo.sh`:
+The script automatically generates unique storage account names. No manual configuration needed for basic usage.
+
+**Important**: Your actual storage account names for this deployment are:
+- **Standard LRS**: `stgdemo73842515801std` through `stgdemo73842515805std`
+- **GRS Accounts**: `stgdemo73842515806grs` through `stgdemo73842515810grs`
+- **ZRS Accounts**: `stgdemo73842515811zrs` through `stgdemo73842515815zrs`
+- **Premium**: `stgdemo73842515816prm`
+- **Legacy V1**: `stgdemo73842515817v1` through `stgdemo73842515820v1`
+
+Use these exact names when running the CLI examples below.
+
+To customize the script, edit variables in `create-storage-demo.sh`:
 ```bash
 RESOURCE_GROUP_NAME="rg-storage-demo"
 LOCATION="Sweden Central"
-BASE_NAME="stgdemo"
+# BASE_NAME is now automatically generated with random suffix
 ```
 
 ## Troubleshooting
-
-**Name conflicts**: Storage account names must be globally unique. Change `BASE_NAME` if needed.
 
 **Timing issues**: Script includes automatic retries and wait conditions.
 
@@ -365,6 +731,16 @@ This demo environment helps you understand:
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request with improvements or additional demo scenarios.
+
+## Recent Improvements
+
+- **Comprehensive Lifecycle Management**: Added complete lifecycle policy templates and automated demo script
+- **Actual Storage Account Names**: Updated all CLI examples with deployment-specific account names
+- **Ready-to-Use Policy Files**: Included JSON files for basic, aggressive, version management, and compliance policies
+- **Automated Demo Script**: `demo-lifecycle-management.sh` provides hands-on lifecycle policy demonstration
+- **Randomized Naming**: Storage account names include unique suffixes to avoid naming conflicts
+- **Enhanced Documentation**: Deep dive section on lifecycle management with practical examples
+- **Cross-Platform Compatibility**: Improved script compatibility across different environments
 
 ## License
 

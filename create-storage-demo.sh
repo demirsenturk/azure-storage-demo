@@ -13,7 +13,12 @@ set -e
 # Configuration variables
 RESOURCE_GROUP_NAME="rg-storage-demo"
 LOCATION="Sweden Central"
-BASE_NAME="stgdemo"
+# Generate a random suffix to ensure unique storage account names
+# Using timestamp + random number for better compatibility
+TIMESTAMP=$(date +%s)
+RANDOM_NUM=$((RANDOM % 900 + 100))  # Random number between 100-999
+RANDOM_SUFFIX="${TIMESTAMP: -6}${RANDOM_NUM}"
+BASE_NAME="stgdemo${RANDOM_SUFFIX}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -27,6 +32,9 @@ echo "Azure Storage Cost Optimization Demo Setup"
 echo "=================================================="
 echo -e "This script will create 20 storage accounts with different configurations"
 echo -e "for cost optimization and lifecycle management demonstrations."
+echo ""
+echo -e "Base name for storage accounts: ${GREEN}${BASE_NAME}${NC}"
+echo -e "Example storage account names: ${BASE_NAME}01std, ${BASE_NAME}02std, etc."
 echo ""
 echo -e "${YELLOW}⚠️  COST WARNING: This will create billable Azure resources!"
 echo -e "Estimated daily cost: \$5-20 depending on region and usage"
